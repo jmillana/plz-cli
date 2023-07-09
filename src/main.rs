@@ -62,71 +62,18 @@ fn main() {
         "Welcome to deez AI!".bright_green()
     );
     let cli = Cli::parse();
-    let mut mode = Mode::Command;
-    match &*cli.mode {
-        "commit" => mode = Mode::Commit,
-        "command" => mode = Mode::Command,
-        _ => (),
-    }
-    println!("AI mode: {}", cli.mode);
     let config = Config::new();
+    let chat_completions = completions::ChatCompletions::new(cli, config);
+    println!("AI mode: {}", chat_completions.mode);
 
-    match mode {
+    match chat_completions.mode {
         Mode::Command => {
-            command_run_workflow(cli, &config);
+            command_run_workflow(chat_completions);
         }
         Mode::Commit => {
-            commit_workflow(cli, &config);
+            commit_workflow(chat_completions);
         }
     }
-}
-
-fn hint_os() -> String {
-    let os_hint = if cfg!(target_os = "macos") {
-        " (on macOS)"
-    } else if cfg!(target_os = "linux") {
-        " (on Linux)"
-    } else {
-        ""
-    };
-
-    return os_hint.to_string();
-}
-fn build_cmd_prompt(prompt: &str) -> (String, String) {
-    let os_hint = hint_os();
-    return (
-        "system".to_string(),
-        format!("{prompt}{os_hint}:\n```bash\n#!/bin/bash\n"),
-    );
-}
-
-fn build_commit_prompt(
-    changes: Vec<String>,
-    gitmoji: bool,
-    hint: &Option<String>,
-) -> (String, String) {
-    let mut system_prompt = "You are an assistant to a programmer that will be generating commit messages for the code changes".to_string();
-    system_prompt.push_str(
-        "\nYour task if to identify the key changes and prepare a single commit message that encapsulates the changes accordingly.",
-    );
-    if gitmoji {
-        system_prompt.push_str(" (using gitmoji emojis)");
-    }
-    let commit_format_hint =
-        "\nFollowing the format: <type> ([optional scope]): <short description>\n\n[optional body]\n[optional footer]\n";
-    system_prompt.push_str(commit_format_hint);
-    println!("{}", system_prompt);
-    let mut user_prompt = "".to_string();
-    if let Some(hint) = hint {
-        user_prompt.push_str(format!("Hint: {}", hint).as_str());
-    }
-    user_prompt.push_str("Provide a commit message for the following changes:\n");
-
-    for change in changes {
-        user_prompt.push_str(change.as_str());
-        user_prompt.push('\n');
-    }
-    return (system_prompt, user_prompt);
 }
 
 fn validate_response(response: Response, mut spinner: Spinner) -> (Response, Spinner) {
@@ -151,100 +98,77 @@ fn validate_response(response: Response, mut spinner: Spinner) -> (Response, Spi
     return (response, spinner);
 }
 
-fn command_run_workflow(cli: Cli, config: &Config) {
-    let spinner = Spinner::new(Spinners::BouncingBar, "Generating your command...".into());
-    let (system_prompt, user_prompt) = build_cmd_prompt(&cli.prompt.join(" "));
-    let response = get_ai_response(system_prompt, user_prompt, &cli, &config);
-    let (response, mut spinner) = validate_response(response, spinner);
-
-    let code = response.json::<serde_json::Value>().unwrap()["choices"][0]["text"]
-        .as_str()
-        .unwrap()
-        .trim()
-        .to_string();
+fn command_run_workflow(mut chat_completions: completions::ChatCompletions) {
+    chat_completions.set_system_prompt(prompts::SystemPrompt::Cmd);
+    let mut spinner = Spinner::new(Spinners::BouncingBar, "Generating your command...".into());
+    let user_prompt = prompts::get_cmd_user_prompt(&chat_completions.cli.prompt.join(" "));
+    let code = chat_completions.run(user_prompt, &mut spinner);
 
     spinner.stop_and_persist(
         "✔".green().to_string().as_str(),
         "Got some code!".green().to_string(),
     );
 
-    PrettyPrinter::new()
-        .input_from_bytes(code.as_bytes())
-        .language("bash")
-        .grid(true)
-        .print()
-        .unwrap();
+    pprint(&code, "bash");
 
-    let should_run = if cli.force {
+    let should_run = if chat_completions.cli.force {
         true
     } else {
-        Question::new(
-            ">> Run the generated program? [Y/n]"
-                .bright_black()
-                .to_string()
-                .as_str(),
-        )
-        .yes_no()
-        .until_acceptable()
-        .default(Answer::YES)
-        .ask()
-        .expect("Couldn't ask question.")
-            == Answer::YES
+        ask_for_confirmation(">> Run the generated program? [Y/n]")
     };
 
     if should_run {
-        config.write_to_history(code.as_str());
+        // config.write_to_history(code.as_str());
         spinner = Spinner::new(Spinners::BouncingBar, "Executing...".into());
-
-        let output = Command::new("bash")
-            .arg("-c")
-            .arg(code.as_str())
-            .output()
-            .unwrap_or_else(|_| {
-                spinner.stop_and_persist(
-                    "✖".red().to_string().as_str(),
-                    "Failed to execute the generated program.".red().to_string(),
-                );
-                std::process::exit(1);
-            });
-
-        if !output.status.success() {
-            spinner.stop_and_persist(
-                "✖".red().to_string().as_str(),
-                "The program threw an error.".red().to_string(),
-            );
-            println!("{}", String::from_utf8_lossy(&output.stderr));
-            std::process::exit(1);
-        }
+        let (stdout, _) = run_cmd(&code, &"bash", &mut spinner);
 
         spinner.stop_and_persist(
             "✔".green().to_string().as_str(),
             "Command ran successfully".green().to_string(),
         );
 
-        println!("{}", String::from_utf8_lossy(&output.stdout));
+        println!("{}", String::from_utf8_lossy(&stdout));
     }
 }
 
-fn commit_workflow(cli: Cli, config: &Config) {
+fn pprint(data: &String, lang: &str) {
+    PrettyPrinter::new()
+        .input_from_bytes(data.as_bytes())
+        .language(lang)
+        .grid(true)
+        .print()
+        .unwrap();
+}
+
+fn ask_for_confirmation(display: &str) -> bool {
+    return Question::new(display)
+        .yes_no()
+        .until_acceptable()
+        .default(Answer::YES)
+        .ask()
+        .expect("Couldn't ask question.")
+        == Answer::YES;
+}
+
+fn commit_workflow(mut chat_completions: completions::ChatCompletions) {
     let mut spinner = Spinner::new(
         Spinners::BouncingBar,
         "Generating your commit message...".into(),
     );
+    chat_completions.set_system_prompt(prompts::SystemPrompt::Commit);
 
-    let commit_changes = get_commit_changes(&mut spinner);
-    let (system_prompt, user_prompt) = build_commit_prompt(commit_changes, cli.gitmoji, &cli.hint);
-    let response = get_ai_response(system_prompt, user_prompt, &cli, &config);
-    let (response, mut spinner) = validate_response(response, spinner);
+    let commit_changes = git::get_commit_changes().unwrap_or_else(|| {
+        spinner.stop_and_persist(
+            "✖".red().to_string().as_str(),
+            "Failed to get commit changes.".red().to_string(),
+        );
+        std::process::exit(1);
+    });
 
-    let mut commit_message = response.json::<serde_json::Value>().unwrap()["choices"][0]["message"]
-        ["content"]
-        .as_str()
-        .unwrap()
-        .trim()
-        .to_string();
+    let prompt = prompts::get_commit_user_prompt(commit_changes, &chat_completions.cli.hint);
+    let mut commit_message = chat_completions.run(prompt, &mut spinner);
 
-    if cli.gitmoji {
+    if chat_completions.cli.gitmoji {
         commit_message = gitmoji::replace_gitmoji(commit_message);
     }
 
@@ -253,93 +177,58 @@ fn commit_workflow(cli: Cli, config: &Config) {
         "Got your commit message!".green().to_string(),
     );
 
-    PrettyPrinter::new()
-        .input_from_bytes(commit_message.as_bytes())
-        .language("bash")
-        .grid(true)
-        .print()
-        .unwrap();
+    pprint(&commit_message, "bash");
 
-    let accept_commit = Question::new(
-        ">> Accept the generated commit? [Y/n]"
-            .bright_black()
-            .to_string()
-            .as_str(),
-    )
-    .yes_no()
-    .until_acceptable()
-    .default(Answer::YES)
-    .ask()
-    .expect("Couldn't ask question.")
-        == Answer::YES;
+    let accept_commit = ask_for_confirmation(">> Accept the generated commit? [Y/n]");
 
     if accept_commit {
-        let generate_commit_cmd = Question::new(
-            ">> Generate a commit with the generated message? [Y/n]"
-                .bright_black()
-                .to_string()
-                .as_str(),
-        )
-        .yes_no()
-        .until_acceptable()
-        .default(Answer::YES)
-        .ask()
-        .expect("Couldn't ask question.")
-            == Answer::YES;
+        let generate_commit_cmd =
+            ask_for_confirmation(">> Generate a commit with the generated message? [Y/n]");
 
         if generate_commit_cmd {
             let mut commit_cmd = "git commit -m '".to_string();
             commit_cmd.push_str(commit_message.as_str());
             commit_cmd.push_str("'");
 
-            PrettyPrinter::new()
-                .input_from_bytes(commit_cmd.as_bytes())
-                .language("bash")
-                .grid(true)
-                .print()
-                .unwrap();
+            pprint(&commit_cmd, "bash");
 
-            let should_run = Question::new(
-                ">> Run the generated commit? [Y/n]"
-                    .bright_black()
-                    .to_string()
-                    .as_str(),
-            )
-            .yes_no()
-            .until_acceptable()
-            .default(Answer::YES)
-            .ask()
-            .expect("Couldn't ask question.")
-                == Answer::YES;
+            let should_run = ask_for_confirmation(">> Run the generated commit? [Y/n]");
 
             if should_run {
                 spinner = Spinner::new(Spinners::BouncingBar, "Executing...".into());
-                let output = Command::new("bash")
-                    .arg("-c")
-                    .arg(commit_cmd.as_str())
-                    .output()
-                    .unwrap_or_else(|_| {
-                        spinner.stop_and_persist(
-                            "✖".red().to_string().as_str(),
-                            "Failed to execute the generated program.".red().to_string(),
-                        );
-                        std::process::exit(1);
-                    });
-
-                if !output.status.success() {
-                    spinner.stop_and_persist(
-                        "✖".red().to_string().as_str(),
-                        "The program threw an error.".red().to_string(),
-                    );
-                    println!("{}", String::from_utf8_lossy(&output.stderr));
-                    std::process::exit(1);
-                }
+                let (stdout, _) = run_cmd(&commit_cmd, &"bash", &mut spinner);
 
                 spinner.stop_and_persist(
                     "✔".green().to_string().as_str(),
-                    "Commit generated successfully".green().to_string(),
+                    "Command ran successfully".green().to_string(),
                 );
+
+                println!("{}", String::from_utf8_lossy(&stdout));
             }
         }
     }
+}
+
+fn run_cmd(command: &str, shell: &str, spinner: &mut Spinner) -> (Vec<u8>, Vec<u8>) {
+    let output = Command::new(shell)
+        .arg("-c")
+        .arg(command)
+        .output()
+        .unwrap_or_else(|_| {
+            spinner.stop_and_persist(
+                "✖".red().to_string().as_str(),
+                "Failed to execute the generated program.".red().to_string(),
+            );
+            std::process::exit(1);
+        });
+
+    if !output.status.success() {
+        spinner.stop_and_persist(
+            "✖".red().to_string().as_str(),
+            "The program threw an error.".red().to_string(),
+        );
+        std::process::exit(1);
+    }
+
+    return (output.stdout, output.stderr);
 }

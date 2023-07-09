@@ -144,9 +144,9 @@ fn build_cmd_prompt(prompt: &str) -> (String, String) {
 }
 
 fn build_commit_prompt(changes: Vec<String>, gitmoji: bool) -> (String, String) {
-    let mut system_prompt = "You are an assistant to a programmer that will be generating commit messages for the code changes, your commit messages".to_string();
+    let mut system_prompt = "You are an assistant to a programmer that will be generating commit messages for the code changes".to_string();
     system_prompt.push_str(
-        "\nYour task if to identify the key changes and prepare the commit message accordingly.",
+        "\nYour task if to identify the key changes and prepare a single commit message that encapsulates the changes accordingly.",
     );
     if gitmoji {
         system_prompt.push_str(" (using gitmoji)");
@@ -154,6 +154,7 @@ fn build_commit_prompt(changes: Vec<String>, gitmoji: bool) -> (String, String) 
     let commit_format_hint =
         "\nFollowing the format: <type> ([optional scope]): <short description>\n\n[optional body]\n[optional footer]\n";
     system_prompt.push_str(commit_format_hint);
+    println!("{}", system_prompt);
     let mut user_prompt = "Provide a commit message for the following changes:\n".to_string();
 
     for change in changes {

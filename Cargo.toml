@@ -1,5 +1,5 @@
 [package]
-name = "plz"
+name = "term-ai"
 license = "MIT"
 edition = "2021"
 version = "0.1.0"
@@ -10,18 +10,22 @@ repository = "https://github.com/m1guelpf/plz-cli"
 authors = ["Miguel Piedrafita <soy@miguelpiedrafita.com>"]
 description = "Generate bash scripts from the command line, using Codex"
 
+[[bin]]
+name = "lazy"
+path = "src/main.rs"
+
 [dependencies]
 question = "0.2.2"
 spinners = "4.1.0"
-serde_json = { version = "1.0.89", default-features = false }
-clap = { version = "4.0.29", features = ["derive"] }
-reqwest = { version = "0.11.13", default-features = false, features = [
+serde_json = { version = "1.0.100", default-features = false }
+clap = { version = "4.3.11", features = ["derive"] }
+reqwest = { version = "0.11.18", default-features = false, features = [
   "json",
   "blocking",
   "rustls-tls",
 ] }
-bat = { version = "0.22.1", default-features = false, features = [
+bat = { version = "0.23.0", default-features = false, features = [
   "regex-onig",
 ] }
-colored = "2.0.0"
+colored = "2.0.4"
 regex = "1.9.1"

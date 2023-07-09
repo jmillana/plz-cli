@@ -5,7 +5,6 @@ use clap::Parser;
 use colored::Colorize;
 use config::Config;
 use question::{Answer, Question};
-use regex::Regex;
 use reqwest::blocking::{Client, Response};
 use serde_json::json;
 use spinners::{Spinner, Spinners};
@@ -26,7 +25,7 @@ struct Cli {
     mode: String,
 
     // Gitmoji support
-    #[clap(short, long)]
+    #[clap(short = 'e', long)]
     gitmoji: bool,
 
     /// Run the generated program without asking for confirmation
@@ -35,6 +34,9 @@ struct Cli {
 
     #[clap(short, long)]
     token_limit: Option<usize>,
+
+    #[clap(short = 'H', long)]
+    hint: Option<String>,
 }
 
 enum Mode {
@@ -146,19 +148,27 @@ fn build_cmd_prompt(prompt: &str) -> (String, String) {
     );
 }
 
-fn build_commit_prompt(changes: Vec<String>, gitmoji: bool) -> (String, String) {
+fn build_commit_prompt(
+    changes: Vec<String>,
+    gitmoji: bool,
+    hint: &Option<String>,
+) -> (String, String) {
     let mut system_prompt = "You are an assistant to a programmer that will be generating commit messages for the code changes".to_string();
     system_prompt.push_str(
         "\nYour task if to identify the key changes and prepare a single commit message that encapsulates the changes accordingly.",
     );
     if gitmoji {
-        system_prompt.push_str(" (using gitmoji)");
+        system_prompt.push_str(" (using gitmoji emojis)");
     }
     let commit_format_hint =
         "\nFollowing the format: <type> ([optional scope]): <short description>\n\n[optional body]\n[optional footer]\n";
     system_prompt.push_str(commit_format_hint);
     println!("{}", system_prompt);
-    let mut user_prompt = "Provide a commit message for the following changes:\n".to_string();
+    let mut user_prompt = "".to_string();
+    if let Some(hint) = hint {
+        user_prompt.push_str(format!("Hint: {}", hint).as_str());
+    }
+    user_prompt.push_str("Provide a commit message for the following changes:\n");
 
     for change in changes {
         user_prompt.push_str(change.as_str());
@@ -271,7 +281,7 @@ fn commit_workflow(cli: Cli, config: &Config) {
     );
 
     let commit_changes = get_commit_changes(&mut spinner);
-    let (system_prompt, user_prompt) = build_commit_prompt(commit_changes, cli.gitmoji);
+    let (system_prompt, user_prompt) = build_commit_prompt(commit_changes, cli.gitmoji, &cli.hint);
     let response = get_ai_response(system_prompt, user_prompt, &cli, &config);
     let (response, mut spinner) = validate_response(response, spinner);
 

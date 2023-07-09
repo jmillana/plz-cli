@@ -43,25 +43,6 @@ enum Mode {
 
 fn get_commit_changes() -> Vec<String> {
     // Get the changes in the working directory
-    let output = Command::new("git")
-        .arg("status")
-        .arg("--porcelain")
-        .output()
-        .unwrap_or_else(|_| {
-            println!("Failed to execute git status.");
-            std::process::exit(1);
-        });
-
-    if !output.status.success() {
-        println!("Failed to execute git status.");
-        std::process::exit(1);
-    }
-
-    if output.stdout.is_empty() {
-        println!("No changes to commit.");
-        std::process::exit(0);
-    }
-
     let diff = Command::new("git")
         .arg("diff")
         .arg("--cached")
@@ -72,17 +53,25 @@ fn get_commit_changes() -> Vec<String> {
         });
 
     let diff = String::from_utf8_lossy(&diff.stdout);
+    if diff.is_empty() {
+        println!("No changes to commit.");
+        std::process::exit(0);
+    }
     // Skip first line
     let diff = diff
         .lines()
         .skip(1)
         .map(|line| line.to_string())
         .collect::<Vec<String>>();
-
     return diff;
 }
 
-fn get_ai_response(prompt: String, cli: &Cli, config: &Config) -> Response {
+fn get_ai_response(
+    system_prompt: String,
+    user_prompt: String,
+    cli: &Cli,
+    config: &Config,
+) -> Response {
     let client = Client::new();
     let api_addr = format!("{}/chat/completions", config.api_base);
     let max_tokens = cli.token_limit.unwrap_or(MAX_TOKENS);
@@ -96,7 +85,10 @@ fn get_ai_response(prompt: String, cli: &Cli, config: &Config) -> Response {
             "presence_penalty": 0,
             "frequency_penalty": 0,
             "model": "gpt-3.5-turbo",
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
         }))
         .header("Authorization", format!("Bearer {}", &config.api_key))
         .send()
@@ -143,31 +135,32 @@ fn hint_os() -> String {
 
     return os_hint.to_string();
 }
-fn build_cmd_prompt(prompt: &str) -> String {
+fn build_cmd_prompt(prompt: &str) -> (String, String) {
     let os_hint = hint_os();
-    return format!("{prompt}{os_hint}:\n```bash\n#!/bin/bash\n");
+    return (
+        "system".to_string(),
+        format!("{prompt}{os_hint}:\n```bash\n#!/bin/bash\n"),
+    );
 }
 
-fn build_commit_prompt(changes: Vec<String>, gitmoji: bool) -> String {
-    let os_hint = hint_os();
-    let mut prompt = String::from("Generate a commit message with the key changes");
+fn build_commit_prompt(changes: Vec<String>, gitmoji: bool) -> (String, String) {
+    let mut system_prompt = "You are an assistant to a programmer that will be generating commit messages for the code changes, your commit messages".to_string();
+    system_prompt.push_str(
+        "\nYour task if to identify the key changes and prepare the commit message accordingly.",
+    );
     if gitmoji {
-        prompt.push_str(" (with gitmoji)");
+        system_prompt.push_str(" (using gitmoji)");
     }
-    prompt.push_str(&os_hint);
-    prompt.push_str(":\n");
     let commit_format_hint =
-        "Following the format: <type> ([optional scope]): <short description>\n\n[optional body]\n[optional footer]\n";
-    prompt.push_str(commit_format_hint);
-    prompt.push_str("For the changes:\n```diff\n");
+        "\nFollowing the format: <type> ([optional scope]): <short description>\n\n[optional body]\n[optional footer]\n";
+    system_prompt.push_str(commit_format_hint);
+    let mut user_prompt = "Provide a commit message for the following changes:\n".to_string();
 
     for change in changes {
-        prompt.push_str(change.as_str());
-        prompt.push('\n');
+        user_prompt.push_str(change.as_str());
+        user_prompt.push('\n');
     }
-    prompt.push_str("```bash\n#!/bin/bash\n");
-    println!("{}", prompt);
-    return prompt;
+    return (system_prompt, user_prompt);
 }
 
 fn validate_response(response: Response, mut spinner: Spinner) -> (Response, Spinner) {
@@ -194,8 +187,8 @@ fn validate_response(response: Response, mut spinner: Spinner) -> (Response, Spi
 
 fn command_run_workflow(cli: Cli, config: &Config) {
     let spinner = Spinner::new(Spinners::BouncingBar, "Generating your command...".into());
-    let prompt = build_cmd_prompt(&cli.prompt.join(" "));
-    let response = get_ai_response(prompt, &cli, &config);
+    let (system_prompt, user_prompt) = build_cmd_prompt(&cli.prompt.join(" "));
+    let response = get_ai_response(system_prompt, user_prompt, &cli, &config);
     let (response, mut spinner) = validate_response(response, spinner);
 
     let code = response.json::<serde_json::Value>().unwrap()["choices"][0]["text"]
@@ -272,9 +265,10 @@ fn commit_workflow(cli: Cli, config: &Config) {
         Spinners::BouncingBar,
         "Generating your commit message...".into(),
     );
+
     let commit_changes = get_commit_changes();
-    let prompt = build_commit_prompt(commit_changes, cli.gitmoji);
-    let response = get_ai_response(prompt, &cli, &config);
+    let (system_prompt, user_prompt) = build_commit_prompt(commit_changes, cli.gitmoji);
+    let response = get_ai_response(system_prompt, user_prompt, &cli, &config);
     let (response, mut spinner) = validate_response(response, spinner);
 
     let mut commit_message = response.json::<serde_json::Value>().unwrap()["choices"][0]["message"]
@@ -283,6 +277,10 @@ fn commit_workflow(cli: Cli, config: &Config) {
         .unwrap()
         .trim()
         .to_string();
+
+    if cli.gitmoji {
+        commit_message = replace_gitmoji(commit_message);
+    }
 
     spinner.stop_and_persist(
         "✔".green().to_string().as_str(),
@@ -325,39 +323,57 @@ fn commit_workflow(cli: Cli, config: &Config) {
 
         if generate_commit_cmd {
             let mut commit_cmd = "git commit -m '".to_string();
-            if cli.gitmoji {
-                commit_message = replace_gitmoji(commit_message);
-            }
             commit_cmd.push_str(commit_message.as_str());
             commit_cmd.push_str("'");
 
-            spinner = Spinner::new(Spinners::BouncingBar, "Executing...".into());
+            PrettyPrinter::new()
+                .input_from_bytes(commit_cmd.as_bytes())
+                .language("bash")
+                .grid(true)
+                .print()
+                .unwrap();
 
-            let output = Command::new("bash")
-                .arg("-c")
-                .arg(commit_cmd.as_str())
-                .output()
-                .unwrap_or_else(|_| {
+            let should_run = Question::new(
+                ">> Run the generated commit? [Y/n]"
+                    .bright_black()
+                    .to_string()
+                    .as_str(),
+            )
+            .yes_no()
+            .until_acceptable()
+            .default(Answer::YES)
+            .ask()
+            .expect("Couldn't ask question.")
+                == Answer::YES;
+
+            if should_run {
+                spinner = Spinner::new(Spinners::BouncingBar, "Executing...".into());
+                let output = Command::new("bash")
+                    .arg("-c")
+                    .arg(commit_cmd.as_str())
+                    .output()
+                    .unwrap_or_else(|_| {
+                        spinner.stop_and_persist(
+                            "✖".red().to_string().as_str(),
+                            "Failed to execute the generated program.".red().to_string(),
+                        );
+                        std::process::exit(1);
+                    });
+
+                if !output.status.success() {
                     spinner.stop_and_persist(
                         "✖".red().to_string().as_str(),
-                        "Failed to execute the generated program.".red().to_string(),
+                        "The program threw an error.".red().to_string(),
                     );
+                    println!("{}", String::from_utf8_lossy(&output.stderr));
                     std::process::exit(1);
-                });
+                }
 
-            if !output.status.success() {
                 spinner.stop_and_persist(
-                    "✖".red().to_string().as_str(),
-                    "The program threw an error.".red().to_string(),
+                    "✔".green().to_string().as_str(),
+                    "Commit generated successfully".green().to_string(),
                 );
-                println!("{}", String::from_utf8_lossy(&output.stderr));
-                std::process::exit(1);
             }
-
-            spinner.stop_and_persist(
-                "✔".green().to_string().as_str(),
-                "Commit generated successfully".green().to_string(),
-            );
         }
     }
 }
@@ -375,9 +391,14 @@ fn get_gitmojis(tag: String) -> String {
     // Check if gitmoji is empty
     if gitmoji.stdout.is_empty() {
         println!("No gitmojis found.");
+        let out = String::from_utf8_lossy(&gitmoji.stdout).to_string();
+        println!("{}", out);
         std::process::exit(1);
     }
-    return String::from_utf8_lossy(&gitmoji.stdout).to_string();
+    return String::from_utf8_lossy(&gitmoji.stdout)
+        .to_string()
+        .trim()
+        .to_string();
 }
 
 fn replace_gitmoji(commit_message: String) -> String {

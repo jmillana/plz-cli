@@ -19,8 +19,15 @@ impl SystemPrompt {
 pub fn cmd_system_prompt() -> String {
     let mut prompt = String::new();
     prompt.push_str(
-        "You will be providing the command to run on the system based on the user inputs.\n",
+        "You are an assistant to a programmer that will be running commands on the system",
     );
+    prompt.push_str(
+        "\nYour task if to identify the key inputs and prepare a single command that encapsulates the inputs accordingly.",
+    );
+    prompt.push_str("\nFollowing the format: <command> <input1> <input2> ... <inputN>\n");
+    prompt.push_str("Example: ls -l -a -h\n");
+    prompt.push_str("Example: git commit -m \"<message>\"\n");
+    prompt.push_str("Example: cat /etc/passwd | awk -F: '{ print $1 }'\n");
     return prompt;
 }
 
@@ -40,7 +47,7 @@ pub fn commit_system_prompt(gitmoji: bool) -> String {
 
 pub fn get_cmd_user_prompt(prompt: &str) -> String {
     let os_hint = hint_os();
-    return format!("{prompt}{os_hint}:\n```bash\n#!/bin/bash\n");
+    return format!("{prompt}{os_hint}:\n");
 }
 
 pub fn get_commit_user_prompt(changes: Vec<String>, hint: &Option<String>) -> String {

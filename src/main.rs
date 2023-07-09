@@ -12,8 +12,9 @@ use spinners::{Spinner, Spinners};
 use std::process::Command;
 
 mod config;
+mod gitmoji;
 
-const MAX_TOKENS: usize = 100;
+const MAX_TOKENS: usize = 1000;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -41,7 +42,7 @@ enum Mode {
     Commit,
 }
 
-fn get_commit_changes() -> Vec<String> {
+fn get_commit_changes(spinner: &mut Spinner) -> Vec<String> {
     // Get the changes in the working directory
     let diff = Command::new("git")
         .arg("diff")
@@ -54,7 +55,10 @@ fn get_commit_changes() -> Vec<String> {
 
     let diff = String::from_utf8_lossy(&diff.stdout);
     if diff.is_empty() {
-        println!("No changes to commit.");
+        spinner.stop_and_persist(
+            "✖".red().to_string().as_str(),
+            "No changes to commit.".red().to_string(),
+        );
         std::process::exit(0);
     }
     // Skip first line
@@ -101,11 +105,10 @@ fn main() {
     println!(
         "{} {}",
         "🤖".bright_green(),
-        "Welcome to GitAI!".bright_green()
+        "Welcome to deez AI!".bright_green()
     );
     let cli = Cli::parse();
     let mut mode = Mode::Command;
-    println!("AI prompt: {}", cli.prompt.join(" "));
     match &*cli.mode {
         "commit" => mode = Mode::Commit,
         "command" => mode = Mode::Command,
@@ -262,12 +265,12 @@ fn command_run_workflow(cli: Cli, config: &Config) {
 }
 
 fn commit_workflow(cli: Cli, config: &Config) {
-    let spinner = Spinner::new(
+    let mut spinner = Spinner::new(
         Spinners::BouncingBar,
         "Generating your commit message...".into(),
     );
 
-    let commit_changes = get_commit_changes();
+    let commit_changes = get_commit_changes(&mut spinner);
     let (system_prompt, user_prompt) = build_commit_prompt(commit_changes, cli.gitmoji);
     let response = get_ai_response(system_prompt, user_prompt, &cli, &config);
     let (response, mut spinner) = validate_response(response, spinner);
@@ -280,7 +283,7 @@ fn commit_workflow(cli: Cli, config: &Config) {
         .to_string();
 
     if cli.gitmoji {
-        commit_message = replace_gitmoji(commit_message);
+        commit_message = gitmoji::replace_gitmoji(commit_message);
     }
 
     spinner.stop_and_persist(
@@ -377,49 +380,4 @@ fn commit_workflow(cli: Cli, config: &Config) {
             }
         }
     }
-}
-
-fn get_gitmojis(tag: String) -> String {
-    let awk_cmd = "awk '{print $1}'";
-    let gitmoji = Command::new("bash")
-        .arg("-c")
-        .arg(format!("gitmoji -s {} | {}", tag, awk_cmd))
-        .output()
-        .unwrap_or_else(|_| {
-            println!("Failed to execute gitmoji.");
-            std::process::exit(1);
-        });
-    // Check if gitmoji is empty
-    if gitmoji.stdout.is_empty() {
-        println!("No gitmojis found.");
-        let out = String::from_utf8_lossy(&gitmoji.stdout).to_string();
-        println!("{}", out);
-        std::process::exit(1);
-    }
-    return String::from_utf8_lossy(&gitmoji.stdout)
-        .to_string()
-        .trim()
-        .to_string();
-}
-
-fn replace_gitmoji(commit_message: String) -> String {
-    let mut new_message = commit_message.clone();
-    // Parse the string looking for unique gitmojis tags, e.g. :bug:
-    let re = Regex::new(r":\w+:").unwrap();
-    let matches: Vec<_> = re.find_iter(&commit_message).collect();
-    // If there are no matches, return the original message
-    if matches.is_empty() {
-        return commit_message;
-    }
-    // Get the gitmojis
-    for tag in matches {
-        let gitmoji = get_gitmojis(tag.as_str().to_string());
-        // If there are no gitmojis for the tag, skip it
-        if gitmoji.is_empty() {
-            continue;
-        }
-        // Replace the tag with the gitmoji
-        new_message = new_message.replace(&tag.as_str(), &gitmoji);
-    }
-    return new_message;
 }

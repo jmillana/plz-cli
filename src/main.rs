@@ -5,19 +5,21 @@ use clap::Parser;
 use colored::Colorize;
 use config::Config;
 use question::{Answer, Question};
-use reqwest::blocking::{Client, Response};
-use serde_json::json;
+use reqwest::blocking::Response;
 use spinners::{Spinner, Spinners};
 use std::process::Command;
 
+mod chat_gpt;
 mod config;
+mod git;
 mod gitmoji;
+mod prompts;
 
-const MAX_TOKENS: usize = 1000;
+use crate::chat_gpt::completions;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct Cli {
+pub struct Cli {
     /// Description of the command to execute
     prompt: Vec<String>,
 
@@ -39,68 +41,18 @@ struct Cli {
     hint: Option<String>,
 }
 
-enum Mode {
+pub enum Mode {
     Command,
     Commit,
 }
 
-fn get_commit_changes(spinner: &mut Spinner) -> Vec<String> {
-    // Get the changes in the working directory
-    let diff = Command::new("git")
-        .arg("diff")
-        .arg("--cached")
-        .output()
-        .unwrap_or_else(|_| {
-            println!("Failed to execute git diff.");
-            std::process::exit(1);
-        });
-
-    let diff = String::from_utf8_lossy(&diff.stdout);
-    if diff.is_empty() {
-        spinner.stop_and_persist(
-            "✖".red().to_string().as_str(),
-            "No changes to commit.".red().to_string(),
-        );
-        std::process::exit(0);
+impl std::fmt::Display for Mode {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Mode::Command => write!(f, "command"),
+            Mode::Commit => write!(f, "commit"),
+        }
     }
-    // Skip first line
-    let diff = diff
-        .lines()
-        .skip(1)
-        .map(|line| line.to_string())
-        .collect::<Vec<String>>();
-    return diff;
-}
-
-fn get_ai_response(
-    system_prompt: String,
-    user_prompt: String,
-    cli: &Cli,
-    config: &Config,
-) -> Response {
-    let client = Client::new();
-    let api_addr = format!("{}/chat/completions", config.api_base);
-    let max_tokens = cli.token_limit.unwrap_or(MAX_TOKENS);
-
-    let response = client
-        .post(api_addr)
-        .json(&json!({
-            "top_p": 1,
-            "temperature": 0,
-            "max_tokens": max_tokens,
-            "presence_penalty": 0,
-            "frequency_penalty": 0,
-            "model": "gpt-3.5-turbo",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-        }))
-        .header("Authorization", format!("Bearer {}", &config.api_key))
-        .send()
-        .unwrap();
-
-    return response;
 }
 
 fn main() {

@@ -13,10 +13,8 @@ fn get_gitmojis(tag: String) -> String {
         });
     // Check if gitmoji is empty
     if gitmoji.stdout.is_empty() {
-        println!("No gitmojis found.");
-        let out = String::from_utf8_lossy(&gitmoji.stdout).to_string();
-        println!("{}", out);
-        std::process::exit(1);
+        println!("No gitmojis found for tag {}", tag);
+        return tag;
     }
     return String::from_utf8_lossy(&gitmoji.stdout)
         .to_string()

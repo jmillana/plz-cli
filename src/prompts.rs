@@ -1,4 +1,5 @@
 use crate::Cli;
+use serde::{Deserialize, Serialize};
 
 pub enum SystemPrompt {
     Cmd,
@@ -6,62 +7,79 @@ pub enum SystemPrompt {
 }
 
 impl SystemPrompt {
-    pub fn prompt(self: Self, options: &Cli) -> String {
-        match self {
+    pub fn prompt(self: Self, options: &Cli) -> Prompt {
+        return match self {
             SystemPrompt::Cmd => cmd_system_prompt(),
-            SystemPrompt::Commit => {
-                return commit_system_prompt(options.gitmoji);
-            }
-        }
+            SystemPrompt::Commit => commit_system_prompt(options.gitmoji),
+        };
     }
 }
 
-pub fn cmd_system_prompt() -> String {
-    let mut prompt = String::new();
-    prompt.push_str(
-        "You are an assistant to a programmer that will be running commands on the system",
-    );
-    prompt.push_str(
-        "\nYour task if to identify the key inputs and prepare a single command that encapsulates the inputs accordingly.",
-    );
-    prompt.push_str("\nFollowing the format: <command> <input1> <input2> ... <inputN>\n");
-    prompt.push_str("Example: ls -l -a -h\n");
-    prompt.push_str("Example: git commit -m \"<message>\"\n");
-    prompt.push_str("Example: cat /etc/passwd | awk -F: '{ print $1 }'\n");
-    return prompt;
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Prompt {
+    pub role: String,
+    pub content: String,
 }
 
-pub fn commit_system_prompt(gitmoji: bool) -> String {
-    let mut prompt = String::new();
-    prompt.push_str("You are an assistant to a programmer that will be generating commit messages for the code changes");
-    prompt.push_str(
+impl Prompt {
+    pub fn new() -> Self {
+        return Prompt {
+            role: String::new(),
+            content: String::new(),
+        };
+    }
+
+    pub fn build(role: String, content: String) -> Self {
+        return Prompt { role, content };
+    }
+}
+
+pub fn cmd_system_prompt() -> Prompt {
+    let mut content = String::new();
+    content.push_str(
+        "You are an assistant to a programmer that will be running commands on the system",
+    );
+    content.push_str(
+        "\nYour task if to identify the key inputs and prepare a single command that encapsulates the inputs accordingly.",
+    );
+    content.push_str("\nFollowing the format: <command> <input1> <input2> ... <inputN>\n");
+    content.push_str("Example: ls -l -a -h\n");
+    content.push_str("Example: git commit -m \"<message>\"\n");
+    content.push_str("Example: cat /etc/passwd | awk -F: '{ print $1 }'\n");
+    return Prompt::build("system".to_string(), content);
+}
+
+pub fn commit_system_prompt(gitmoji: bool) -> Prompt {
+    let mut content = String::new();
+    content.push_str("You are an assistant to a programmer that will be generating commit messages for the code changes");
+    content.push_str(
         "\nYour task if to identify the key changes and prepare a single commit message that encapsulates the changes accordingly.",
     );
     if gitmoji {
-        prompt.push_str(" (using gitmoji emojis)");
+        content.push_str(" (using gitmoji emojis)");
     }
 
-    prompt.push_str("\nFollowing the format: <type> ([optional scope]): <short description>\n\n[optional body]\n[optional footer]\n");
-    return prompt;
+    content.push_str("\nFollowing the format: <type> ([optional scope]): <short description>\n\n[optional body]\n[optional footer]\n");
+    return Prompt::build("system".to_string(), content);
 }
 
-pub fn get_cmd_user_prompt(prompt: &str) -> String {
+pub fn get_cmd_user_prompt(prompt: &str) -> Prompt {
     let os_hint = hint_os();
-    return format!("{prompt}{os_hint}:\n");
+    return Prompt::build("user".to_string(), format!("{}{}:\n", prompt, os_hint));
 }
 
-pub fn get_commit_user_prompt(changes: Vec<String>, hint: &Option<String>) -> String {
-    let mut prompt = String::new();
+pub fn get_commit_user_prompt(changes: Vec<String>, hint: &Option<String>) -> Prompt {
+    let mut content = String::new();
     if let Some(hint) = hint {
-        prompt.push_str(format!("Hint: {}", hint).as_str());
+        content.push_str(format!("Hint: {}", hint).as_str());
     }
-    prompt.push_str("Provide a commit message for the following changes:\n");
+    content.push_str("Provide a commit message for the following changes:\n");
 
     for change in changes {
-        prompt.push_str(change.as_str());
-        prompt.push_str("\n");
+        content.push_str(change.as_str());
+        content.push_str("\n");
     }
-    return prompt;
+    return Prompt::build("user".to_string(), content);
 }
 
 fn hint_os() -> String {

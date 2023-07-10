@@ -1,8 +1,9 @@
+use log;
 use regex::Regex;
 use std::process::Command;
 
 fn get_gitmojis(tag: String) -> String {
-    let awk_cmd = "awk '{print $1}'";
+    let awk_cmd = "awk '{print $1 $3}'";
     let gitmoji = Command::new("bash")
         .arg("-c")
         .arg(format!("gitmoji -s {} | {}", tag, awk_cmd))
@@ -13,13 +14,21 @@ fn get_gitmojis(tag: String) -> String {
         });
     // Check if gitmoji is empty
     if gitmoji.stdout.is_empty() {
-        println!("No gitmojis found for tag {}", tag);
+        log::debug!("No gitmojis found for tag {}", tag);
         return tag;
     }
-    return String::from_utf8_lossy(&gitmoji.stdout)
-        .to_string()
-        .trim()
-        .to_string();
+
+    let emojis = String::from_utf8_lossy(&gitmoji.stdout);
+
+    for line in emojis.lines() {
+        if line.contains(tag.as_str()) {
+            log::debug!("Found gitmoji for tag {} {}", tag, line.to_string());
+            let emoji = line.to_string().replace(tag.as_str(), "");
+            return emoji;
+        }
+    }
+    log::debug!("No gitmojis found for tag {}", tag);
+    return tag;
 }
 
 pub fn replace_gitmoji(commit_message: String) -> String {

@@ -57,7 +57,7 @@ jobs:
       - name: "Move to outputs/ folder"
         run: |
           mkdir outputs
-          cp target/release/*.exe outputs/plz-win-x86_64.exe
+          cp target/release/*.exe outputs/lazy-win-x86_64.exe
 
       - name: Upload to temporary storage
         uses: actions/upload-artifact@master
@@ -104,8 +104,8 @@ jobs:
       - name: "Move to outputs/ folder"
         run: |
           mkdir outputs
-          cp target/release/plz outputs/plz-linux-x86_64
-          cp target/debian/*.deb outputs/plz-linux-x86_64.deb
+          cp target/release/lazy outputs/lazy-linux-x86_64
+          cp target/debian/*.deb outputs/lazy-linux-x86_64.deb
 
       - name: Upload to temporary storage
         uses: actions/upload-artifact@master
@@ -159,7 +159,7 @@ jobs:
       - name: "Move to outputs/ folder"
         run: |
           mkdir outputs
-          cp target/x86_64-unknown-linux-musl/release/plz outputs/plz-linux-musl-x86_64
+          cp target/x86_64-unknown-linux-musl/release/lazy outputs/lazy-linux-musl-x86_64
 
       - name: Upload to temporary storage
         uses: actions/upload-artifact@master
@@ -205,8 +205,8 @@ jobs:
       - name: "Move to outputs/ folder"
         run: |
           mkdir outputs
-          cp target/aarch64-apple-darwin/release/plz outputs/plz-darwin-aarch64
-          cp target/release/plz outputs/plz-darwin-x86_64
+          cp target/aarch64-apple-darwin/release/lazy outputs/lazy-darwin-aarch64
+          cp target/release/lazy outputs/lazy-darwin-x86_64
 
       - name: Upload to temporary storage
         uses: actions/upload-artifact@master

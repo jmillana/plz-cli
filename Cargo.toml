@@ -15,6 +15,7 @@ name = "lazy"
 path = "src/main.rs"
 
 [dependencies]
+log = "0.4.19"
 question = "0.2.2"
 spinners = "4.1.0"
 serde_json = { version = "1.0.100", default-features = false }

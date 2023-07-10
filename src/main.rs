@@ -1,6 +1,7 @@
 #![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 
 use bat::PrettyPrinter;
+use chat_gpt::completions::ChatCompletions;
 use clap::Parser;
 use colored::Colorize;
 use config::Config;
@@ -76,46 +77,12 @@ fn main() {
     }
 }
 
-fn validate_response(response: Response, mut spinner: Spinner) -> (Response, Spinner) {
-    let status_code = response.status();
-    if status_code.is_client_error() {
-        let response_body = response.json::<serde_json::Value>().unwrap();
-        let error_message = response_body["error"]["message"].as_str().unwrap();
-        spinner.stop_and_persist(
-            "✖".red().to_string().as_str(),
-            format!("API error: \"{error_message}\"").red().to_string(),
-        );
-        std::process::exit(1);
-    } else if status_code.is_server_error() {
-        spinner.stop_and_persist(
-            "✖".red().to_string().as_str(),
-            format!("OpenAI is currently experiencing problems. Status code: {status_code}")
-                .red()
-                .to_string(),
-        );
-        std::process::exit(1);
-    }
-    return (response, spinner);
-}
-
 fn command_run_workflow(mut chat_completions: completions::ChatCompletions) {
     chat_completions.set_system_prompt(prompts::SystemPrompt::Cmd);
     let mut spinner = Spinner::new(Spinners::BouncingBar, "Generating your command...".into());
     let user_prompt = prompts::get_cmd_user_prompt(&chat_completions.cli.prompt.join(" "));
-    let code = chat_completions.run(user_prompt, &mut spinner);
-
-    spinner.stop_and_persist(
-        "✔".green().to_string().as_str(),
-        "Got some code!".green().to_string(),
-    );
-
-    pprint(&code, "bash");
-
-    let should_run = if chat_completions.cli.force {
-        true
-    } else {
-        ask_for_confirmation(">> Run the generated program? [Y/n]")
-    };
+    let code = chat_completions.refine_loop(user_prompt, &mut spinner);
+    let should_run = ask_for_confirmation(">> Run the generated program? [Y/n]", None);
 
     if should_run {
         // config.write_to_history(code.as_str());
@@ -140,11 +107,12 @@ fn pprint(data: &String, lang: &str) {
         .unwrap();
 }
 
-fn ask_for_confirmation(display: &str) -> bool {
+fn ask_for_confirmation(display: &str, default_answer: Option<Answer>) -> bool {
+    let defaul_answer = default_answer.unwrap_or(Answer::YES);
     return Question::new(display)
         .yes_no()
         .until_acceptable()
-        .default(Answer::YES)
+        .default(defaul_answer)
         .ask()
         .expect("Couldn't ask question.")
         == Answer::YES;
@@ -166,24 +134,21 @@ fn commit_workflow(mut chat_completions: completions::ChatCompletions) {
     });
 
     let prompt = prompts::get_commit_user_prompt(commit_changes, &chat_completions.cli.hint);
-    let mut commit_message = chat_completions.run(prompt, &mut spinner);
+    let mut commit_message = chat_completions.refine_loop(prompt, &mut spinner);
 
     if chat_completions.cli.gitmoji {
         commit_message = gitmoji::replace_gitmoji(commit_message);
     }
 
-    spinner.stop_and_persist(
-        "✔".green().to_string().as_str(),
-        "Got your commit message!".green().to_string(),
-    );
-
     pprint(&commit_message, "bash");
 
-    let accept_commit = ask_for_confirmation(">> Accept the generated commit? [Y/n]");
+    let accept_commit = ask_for_confirmation(">> Accept the generated commit? [Y/n]", None);
 
     if accept_commit {
-        let generate_commit_cmd =
-            ask_for_confirmation(">> Generate a commit with the generated message? [Y/n]");
+        let generate_commit_cmd = ask_for_confirmation(
+            ">> Generate a commit with the generated message? [Y/n]",
+            None,
+        );
 
         if generate_commit_cmd {
             let mut commit_cmd = "git commit -m '".to_string();
@@ -192,7 +157,7 @@ fn commit_workflow(mut chat_completions: completions::ChatCompletions) {
 
             pprint(&commit_cmd, "bash");
 
-            let should_run = ask_for_confirmation(">> Run the generated commit? [Y/n]");
+            let should_run = ask_for_confirmation(">> Run the generated commit? [Y/n]", None);
 
             if should_run {
                 spinner = Spinner::new(Spinners::BouncingBar, "Executing...".into());

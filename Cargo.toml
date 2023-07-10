@@ -18,6 +18,7 @@ path = "src/main.rs"
 question = "0.2.2"
 spinners = "4.1.0"
 serde_json = { version = "1.0.100", default-features = false }
+serde = { version = "1.0.171", default-features = false }
 clap = { version = "4.3.11", features = ["derive"] }
 reqwest = { version = "0.11.18", default-features = false, features = [
   "json",
